@@ -1,0 +1,73 @@
+%% Component diagram for the backtesting application
+graph LR
+
+  %% GUI Layer
+  subgraph "GUI Layer"
+    DS[DataSourceDialog]
+    CSVW[CsvBacktestWindow]
+    RESTW[RestBacktestWindow]
+    WSW[WsBacktestWindow]
+    BBW[BaseBacktestWindow]
+    SSW[StrategySelectorWidget]
+    MC[MplCanvas]
+  end
+
+  %% Data Layer
+  subgraph "Data Layer"
+    DL[DataLoader]
+    RS[RestStreamer]
+    WS[WebSocketStreamer]
+    YF[YFinance]
+  end
+
+  %% Engine
+  subgraph "Engine"
+    BE[BacktestEngine]
+  end
+
+  %% Strategy Layer
+  subgraph "Strategy Layer"
+    SC[SmaCross]
+    SWT[SmaWithTrailing]
+    APS[AtrPositionSizing]
+    TES[TimedExitSma]
+    MT[MultiTimeframeSma]
+  end
+
+  %% Utils
+  subgraph "Utils"
+    LG[logger]
+  end
+
+
+  %% Relationships
+
+  %% GUI → Data Layer
+  CSVW --> DL
+  RESTW --> RS
+  WSW --> WS
+  WSW --> YF
+
+  %% GUI → Engine
+  CSVW --> BE
+  RESTW --> BE
+  WSW --> BE
+  BBW --> BE
+  BBW --> MC
+  BBW --> SSW
+
+  %% Data Layer → Engine
+  DL --> BE
+  RS --> BE
+  WS --> BE
+  YF --> BE
+
+  %% Engine → Strategy Layer
+  BE --> SC
+  BE --> SWT
+  BE --> APS
+  BE --> TES
+  BE --> MT
+
+  %% Engine → Utils
+  BE --> LG

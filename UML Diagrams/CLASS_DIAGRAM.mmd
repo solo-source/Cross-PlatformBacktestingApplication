@@ -1,0 +1,262 @@
+classDiagram
+    %% =========================
+    %%  Backtesting Core Layer
+    %% =========================
+
+    class BacktestEngine {
+        - cerebro
+        + __init__()
+        + add_data()
+        + set_strategy()
+        + add_observer()
+        + add_analyzer()
+        + run()
+    }
+
+    %% ==================================
+    %%  Strategy Definitions (subclasses of bt.Strategy)
+    %% ==================================
+
+    class SmaCross {
+        <<Strategy>>
+        - dataclose
+        - fast
+        - slow
+        - cross
+        - order
+        - entry_price
+        + __init__()
+        + next()
+        + notify_order()
+        + notify_trade()
+        + stop()
+    }
+
+    class SmaWithTrailing {
+        <<Strategy>>
+        - fast
+        - slow
+        - cross
+        - order
+        - trail_order
+        + __init__()
+        + next()
+        + notify_order()
+        + stop()
+    }
+
+    class AtrPositionSizing {
+        <<Strategy>>
+        - fast
+        - slow
+        - cross
+        - atr
+        - order
+        + __init__()
+        + next()
+        + notify_order()
+        + stop()
+    }
+
+    class TimedExitSma {
+        <<Strategy>>
+        - fast
+        - slow
+        - cross
+        - entry_bar
+        - order
+        - max_hold
+        + __init__()
+        + next()
+        + notify_order()
+        + stop()
+    }
+
+    class MultiTimeframeSma {
+        <<Strategy>>
+        - fast
+        - slow
+        - cross
+        - sma_w
+        - order
+        + __init__()
+        + next()
+        + notify_order()
+        + stop()
+    }
+
+    %% ====================
+    %%  Data Loader Layer
+    %% ====================
+
+    class DataLoader {
+        <<static>>
+        + from_csv()
+        + from_yfinance()
+    }
+
+    %% ================================
+    %%  Real-Time Data Stream Layer
+    %% ================================
+
+    class RestStreamer {
+        - url
+        - interval_s
+        - timer
+        + new_data: Signal
+        + __init__()
+        + start()
+        + stop()
+        + fetch()
+    }
+
+    class WebSocketStreamer {
+        - url
+        - subscribe_msg
+        - socket
+        + new_data: Signal
+        + __init__()
+        + start()
+        + _on_connected()
+        + _on_message()
+    }
+
+    %% =========================
+    %%  GUI – Base & Dialogs
+    %% =========================
+
+    class BaseBacktestWindow {
+        <<QMainWindow>>
+        - engine
+        - data_rows
+        - chart
+        - strategy_selector
+        + __init__()
+        + add_data_controls()   «abstract»
+        + attach_data_feed()   «abstract»
+        + run_backtest()
+    }
+
+    class DataSourceDialog {
+        <<QDialog>>
+        - radio_csv
+        - radio_rest
+        - radio_ws
+        + __init__()
+        + selected_option()
+    }
+
+    class StrategySelectorWidget {
+        <<QWidget>>
+        - combo
+        - param_widgets
+        + __init__()
+        + _build_params()
+        + get_strategy()
+    }
+
+    class MplCanvas {
+        <<FigureCanvasQTAgg>>
+        - fig
+        - axes
+        + __init__()
+    }
+
+    %% =========================
+    %%  GUI – CSV / REST / WS
+    %% =========================
+
+    class CsvBacktestWindow {
+        <<BaseBacktestWindow>>
+        - csv_feed_path
+        + add_data_controls()
+        + on_browse_csv()
+        + attach_data_feed()
+    }
+
+    class RestBacktestWindow {
+        <<BaseBacktestWindow>>
+        - rest_url
+        - rest_data
+        + add_data_controls()
+        + on_load_rest_url()
+        + attach_data_feed()
+    }
+
+    class WsBacktestWindow {
+        <<BaseBacktestWindow>>
+        - live_df
+        - poll_timer
+        - ticker
+        - interval_min
+        - data_rows
+        - engine
+        - current_strat_cls
+        + __init__()
+        + add_data_controls()   (overridden)
+        + _build_data_preview_ui()
+        + _build_results_ui()
+        + on_toggle_live()
+        + fetch_live_data()
+        + _refresh_table()
+        + on_browse_csv()
+        + attach_data_feed()
+        + on_refresh()
+        + run_backtest()        (overridden)
+    }
+
+    %% =========================
+    %%  Logger & Tests
+    %% =========================
+
+    class logger {
+        <<module>>
+        + exception()
+        + debug()
+        + info()
+        + warning()
+        + error()
+    }
+
+    class test_backtester {
+        + test_csv_loader()
+        + test_sma_strategy_runs()
+    }
+
+    %% =========================
+    %%  Relationships
+    %% =========================
+
+    BacktestEngine --> SmaCross
+    BacktestEngine --> SmaWithTrailing
+    BacktestEngine --> AtrPositionSizing
+    BacktestEngine --> TimedExitSma
+    BacktestEngine --> MultiTimeframeSma
+
+    BaseBacktestWindow --> BacktestEngine
+    BaseBacktestWindow --> StrategySelectorWidget
+    BaseBacktestWindow --> MplCanvas
+
+    CsvBacktestWindow --|> BaseBacktestWindow
+    RestBacktestWindow --|> BaseBacktestWindow
+    WsBacktestWindow   --|> BaseBacktestWindow
+
+    DataSourceDialog --> CsvBacktestWindow
+    DataSourceDialog --> RestBacktestWindow
+    DataSourceDialog --> WsBacktestWindow
+
+    CsvBacktestWindow ..> DataLoader
+    RestBacktestWindow ..> DataLoader
+    RestBacktestWindow --> RestStreamer
+    WsBacktestWindow --> RestStreamer
+    WsBacktestWindow --> WebSocketStreamer
+
+    StrategySelectorWidget ..> SmaCross
+    StrategySelectorWidget ..> SmaWithTrailing
+    StrategySelectorWidget ..> AtrPositionSizing
+    StrategySelectorWidget ..> TimedExitSma
+    StrategySelectorWidget ..> MultiTimeframeSma
+
+    test_backtester ..> DataLoader
+    test_backtester ..> BacktestEngine
+    test_backtester ..> SmaCross

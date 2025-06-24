@@ -1,0 +1,82 @@
+sequenceDiagram
+    participant User
+    participant DataSourceDialog
+    participant RestBacktestWindow
+    participant StrategySelectorWidget
+    participant RequestsLib
+    participant BacktestEngine
+    participant Cerebro as Backtrader_Cerebro
+    participant Analyzer as TimeReturnAnalyzer
+    participant MplCanvas
+    participant Logger
+
+    %% Application start
+    User->>DataSourceDialog: launch()
+    DataSourceDialog-->>User: show radio options [CSV / REST / WS]
+    User->>DataSourceDialog: select "REST" and click OK
+    DataSourceDialog-->>User: close dialog
+    DataSourceDialog->>RestBacktestWindow: instantiate()
+    RestBacktestWindow-->>User: show window with "Load REST URL File…" button, strategy dropdown, Run Backtest button, and blank chart
+
+    %% User loads REST URL
+    User->>RestBacktestWindow: click "Load REST URL File…"
+    RestBacktestWindow->>RestBacktestWindow: open QFileDialog to choose .txt file
+    RestBacktestWindow-->>User: user selects "endpoint.txt"
+    RestBacktestWindow->>RestBacktestWindow: read entire file into self.rest_url
+    RestBacktestWindow->>RequestsLib: GET request to self.rest_url
+    RequestsLib-->>RestBacktestWindow: return JSON list of OHLCV dicts
+    RestBacktestWindow->>RestBacktestWindow: convert JSON to pandas DataFrame df
+    RestBacktestWindow->>RestBacktestWindow: parse df["Date"] to datetime, sort ascending
+    RestBacktestWindow->>RestBacktestWindow: set df["openinterest"] = 0
+    RestBacktestWindow->>RestBacktestWindow: set self.rest_data = df
+    RestBacktestWindow->>RestBacktestWindow: set self.data_rows = len(df)
+    RestBacktestWindow->>RestBacktestWindow: initialize self.engine = BacktestEngine()
+    RestBacktestWindow-->>User: show "REST data fetched. <data_rows> bars available."
+
+    %% User selects strategy
+    User->>StrategySelectorWidget: choose strategy (e.g., "ATR Position Sizing")
+    StrategySelectorWidget-->>User: display param inputs (fast, slow, risk_perc, atr_period, atr_mult, etc.)
+
+    %% User clicks "Run Backtest"
+    User->>RestBacktestWindow: click "Run Backtest"
+    RestBacktestWindow->>RestBacktestWindow: strat_cls, strat_params = strategy_selector.get_strategy()
+    RestBacktestWindow-->>RestBacktestWindow: check data_rows against required slow period
+
+    %% Attach data feed(s) to engine
+    RestBacktestWindow->>BacktestEngine: initialize new BacktestEngine()
+    RestBacktestWindow->>RestBacktestWindow: copy self.rest_data to df
+    RestBacktestWindow->>RestBacktestWindow: rename "Date" column to "datetime"
+    RestBacktestWindow->>RestBacktestWindow: set df index to "datetime"
+    RestBacktestWindow->>RestBacktestWindow: ensure df["openinterest"] = 0
+    RestBacktestWindow->>BacktestEngine: add_data(daily_feed)
+
+    alt Strategy is MultiTimeframeSma
+        RestBacktestWindow->>RestBacktestWindow: resample df weekly to df_weekly
+        RestBacktestWindow->>RestBacktestWindow: set df_weekly["openinterest"] = 0
+        RestBacktestWindow->>BacktestEngine: add_data(weekly_feed)
+    else Other strategy
+        RestBacktestWindow-->>RestBacktestWindow: skip weekly feed
+    end
+
+    %% Configure and run strategy
+    RestBacktestWindow->>BacktestEngine: set_strategy(strat_cls, **strat_params, printlog=True)
+    RestBacktestWindow->>BacktestEngine: add_analyzer(TimeReturnAnalyzer, _name="timereturn")
+    RestBacktestWindow->>BacktestEngine: run()
+    BacktestEngine->>Backtrader_Cerebro: cerebro.run()
+    Backtrader_Cerebro-->>BacktestEngine: return [strategy_instance]
+    BacktestEngine-->>RestBacktestWindow: return [strategy_instance]
+
+    %% Extract TimeReturn and build equity curve
+    RestBacktestWindow->>RestBacktestWindow: tr = strategy_instance.analyzers.timereturn.get_analysis()
+    RestBacktestWindow->>RestBacktestWindow: initialize cum_value = starting cash
+    RestBacktestWindow->>RestBacktestWindow: loop over tr to compute dates[] and equity[]
+
+    %% Plotting
+    RestBacktestWindow->>MplCanvas: clear axes
+    RestBacktestWindow->>MplCanvas: plot(dates, equity)
+    MplCanvas-->>RestBacktestWindow: chart updated
+    RestBacktestWindow-->>User: display equity curve on canvas
+
+    %% Logging path
+    BacktestEngine->>Logger: logger.exception(...) [if any error]
+    Cerebro->>Logger: log buy/sell actions via BuySell observer

@@ -1,0 +1,86 @@
+sequenceDiagram
+    participant User
+    participant DataSourceDialog
+    participant WsBacktestWindow
+    participant StrategySelectorWidget
+    participant YFinance
+    participant BacktestEngine
+    participant Cerebro as Backtrader_Cerebro
+    participant Analyzer as TimeReturnAnalyzer
+    participant MplCanvas
+    participant Logger
+
+    %% Application start
+    User->>DataSourceDialog: launch()
+    DataSourceDialog-->>User: show radio options [CSV / REST / WS]
+    User->>DataSourceDialog: select "WS" and click OK
+    DataSourceDialog-->>User: close dialog
+    DataSourceDialog->>WsBacktestWindow: instantiate()
+    WsBacktestWindow-->>User: show window with ticker input, interval input, Start Live Feed button, table, and Run Backtest button
+
+    %% User starts live feed
+    User->>WsBacktestWindow: enter ticker "SPY"
+    WsBacktestWindow-->>User: update ticker field
+    User->>WsBacktestWindow: enter interval 1 min
+    WsBacktestWindow-->>User: update interval field
+    User->>WsBacktestWindow: click "Start Live Feed"
+    WsBacktestWindow->>WsBacktestWindow: create QTimer with 1-minute interval
+    WsBacktestWindow->>WsBacktestWindow: call fetch_live_data() immediately
+
+    %% First fetch_live_data call
+    WsBacktestWindow->>YFinance: download SPY 1d 1m data
+    YFinance-->>WsBacktestWindow: return DataFrame df
+    WsBacktestWindow->>WsBacktestWindow: combine df with live_df
+    WsBacktestWindow->>WsBacktestWindow: drop duplicates and sort
+    WsBacktestWindow->>WsBacktestWindow: set data_rows = len(live_df)
+    WsBacktestWindow->>WsBacktestWindow: update rowcount_label
+    WsBacktestWindow->>WsBacktestWindow: refresh QTableWidget with last 100 rows
+
+    %% Periodic fetch (omitted repetition)
+
+    %% User selects strategy
+    User->>StrategySelectorWidget: choose "SMA + Trailing Stop"
+    StrategySelectorWidget-->>User: display param inputs (fast, slow, trail_pct, etc.)
+
+    %% User clicks "Run Backtest"
+    User->>WsBacktestWindow: click "Run Backtest"
+    WsBacktestWindow->>WsBacktestWindow: strat_cls, strat_params = strategy_selector.get_strategy()
+    WsBacktestWindow-->>WsBacktestWindow: check data_rows against required slow period
+
+    %% Attach data feed(s) to engine
+    WsBacktestWindow->>BacktestEngine: initialize new BacktestEngine()
+    WsBacktestWindow->>WsBacktestWindow: copy live_df to df_daily
+    WsBacktestWindow->>WsBacktestWindow: rename "Date" to "datetime" and set index
+    WsBacktestWindow->>WsBacktestWindow: set df_daily["openinterest"] = 0
+    WsBacktestWindow->>BacktestEngine: add_data(daily_feed)
+
+    alt Strategy is MultiTimeframeSma
+        WsBacktestWindow->>WsBacktestWindow: resample df_daily weekly to df_weekly
+        WsBacktestWindow->>WsBacktestWindow: set df_weekly["openinterest"] = 0
+        WsBacktestWindow->>BacktestEngine: add_data(weekly_feed)
+    else Other strategy
+        WsBacktestWindow-->>WsBacktestWindow: skip weekly feed
+    end
+
+    %% Configure and run strategy
+    WsBacktestWindow->>BacktestEngine: set_strategy(strat_cls, **strat_params, printlog=True)
+    WsBacktestWindow->>BacktestEngine: add_analyzer(TimeReturnAnalyzer, _name="timereturn")
+    WsBacktestWindow->>BacktestEngine: run()
+    BacktestEngine->>Backtrader_Cerebro: cerebro.run()
+    Backtrader_Cerebro-->>BacktestEngine: return [strategy_instance]
+    BacktestEngine-->>WsBacktestWindow: return [strategy_instance]
+
+    %% Extract TimeReturn and build equity curve
+    WsBacktestWindow->>WsBacktestWindow: tr = strategy_instance.analyzers.timereturn.get_analysis()
+    WsBacktestWindow->>WsBacktestWindow: initialize cum_value = starting cash
+    WsBacktestWindow->>WsBacktestWindow: loop over tr to compute dates[] and equity[]
+
+    %% Plotting
+    WsBacktestWindow->>MplCanvas: clear axes
+    WsBacktestWindow->>MplCanvas: plot(dates, equity)
+    MplCanvas-->>WsBacktestWindow: chart updated
+    WsBacktestWindow-->>User: switch to "Backtest Results" tab and display equity curve
+
+    %% Logging path
+    BacktestEngine->>Logger: logger.exception(...) [if any error]
+    Cerebro->>Logger: log buy/sell actions via BuySell observer

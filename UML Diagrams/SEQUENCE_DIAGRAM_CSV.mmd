@@ -1,0 +1,66 @@
+sequenceDiagram
+    participant User
+    participant DataSourceDialog
+    participant CsvBacktestWindow
+    participant StrategySelectorWidget
+    participant DataLoader
+    participant BacktestEngine
+    participant Cerebro as Backtrader_Cerebro
+    participant Analyzer as TimeReturnAnalyzer
+    participant MplCanvas
+    participant Logger
+
+    %% Application start
+    User->>DataSourceDialog: launch()
+    DataSourceDialog-->>User: show radio options [CSV / REST / WS]
+    User->>DataSourceDialog: select "CSV" and click OK
+    DataSourceDialog-->>User: close dialog
+    DataSourceDialog->>CsvBacktestWindow: instantiate()
+    CsvBacktestWindow-->>User: show window with controls and blank chart
+
+    %% User loads CSV
+    User->>CsvBacktestWindow: click "Browse CSV File..."
+    CsvBacktestWindow->>DataLoader: from_csv(filepath)
+    DataLoader-->>CsvBacktestWindow: return (PandasData feed, row_count)
+    CsvBacktestWindow->>CsvBacktestWindow: set self.csv_feed_path = filepath
+    CsvBacktestWindow->>CsvBacktestWindow: set self.data_rows = row_count
+    CsvBacktestWindow->>CsvBacktestWindow: initialize self.engine = BacktestEngine()
+    CsvBacktestWindow-->>User: show "CSV Loaded: <path>, <row_count> bars available"
+
+    %% User selects strategy
+    User->>StrategySelectorWidget: choose strategy (e.g., "SMA + Trailing Stop")
+    StrategySelectorWidget-->>User: display param inputs (fast, slow, trail_pct, etc.)
+
+    %% User clicks "Run Backtest"
+    User->>CsvBacktestWindow: click "Run Backtest"
+    CsvBacktestWindow->>CsvBacktestWindow: strat_cls, strat_params = strategy_selector.get_strategy()
+    CsvBacktestWindow-->>CsvBacktestWindow: check data_rows against required slow period
+
+    %% Attach data feed(s) to engine
+    CsvBacktestWindow->>BacktestEngine: initialize new BacktestEngine()
+    CsvBacktestWindow->>DataLoader: read CSV into DataFrame df
+    DataLoader-->>CsvBacktestWindow: return DataFrame df
+    CsvBacktestWindow->>CsvBacktestWindow: preprocess df (set datetime, sort, openinterest)
+    CsvBacktestWindow->>BacktestEngine: add_data(daily_feed)
+    CsvBacktestWindow-->>CsvBacktestWindow: skip weekly feed (strategy ≠ MultiTimeframeSma)
+
+    %% Configure and run strategy
+    CsvBacktestWindow->>BacktestEngine: set_strategy(strat_cls, **strat_params, printlog=True)
+    CsvBacktestWindow->>BacktestEngine: add_analyzer(TimeReturnAnalyzer, _name="timereturn")
+    CsvBacktestWindow->>BacktestEngine: run()
+    BacktestEngine->>Backtrader_Cerebro: cerebro.run()
+    Backtrader_Cerebro-->>BacktestEngine: return [strategy_instance]
+    BacktestEngine-->>CsvBacktestWindow: return [strategy_instance]
+
+    %% Extract TimeReturn and build equity curve
+    CsvBacktestWindow->>CsvBacktestWindow: tr = strategy_instance.analyzers.timereturn.get_analysis()
+    CsvBacktestWindow->>CsvBacktestWindow: compute cumulative equity (dates[], equity[])
+
+    %% Plotting
+    CsvBacktestWindow->>MplCanvas: plot(dates, equity)
+    MplCanvas-->>CsvBacktestWindow: chart updated
+    CsvBacktestWindow-->>User: switch to "Results" tab and display equity curve
+
+    %% Logging path
+    BacktestEngine->>Logger: logger.exception(...) [if any error]
+    Cerebro->>Logger: log buy/sell actions via BuySell observer

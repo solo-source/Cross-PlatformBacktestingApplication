@@ -1,0 +1,40 @@
+flowchart TB
+    A([Start]) --> B(Show DataSourceDialog)
+    B --> C{User Chooses Data Source}
+    C -->|CSV| D(Open CsvBacktestWindow)
+    C -->|REST| E(Open RestBacktestWindow)
+    C -->|WS| F(Open WsBacktestWindow)
+
+    %% CSV Branch
+    D --> G(User Clicks Browse CSV)
+    G --> L(Load CSV via DataLoader from CSV)
+    L --> O(Engine Initialized and data_rows Set)
+
+    %% REST Branch
+    E --> H(User Clicks Load REST URL File)
+    H --> M(Fetch JSON from REST and Convert to DataFrame)
+    M --> O
+
+    %% WS Branch
+    F --> I{Live Feed or CSV for Backtest?}
+    I -->|Live| J(User Clicks Start Live Feed)
+    I -->|CSV| K(User Clicks Browse CSV)
+    K --> L
+    J --> N(Fetch Live Data from yfinance)
+    N --> P(Update live_df and Set data_rows)
+    P --> O
+
+    %% After Data is Loaded
+    O --> Q(User Selects Strategy and Parameters)
+    Q --> R(User Clicks Run Backtest)
+    R --> S(Check if data_rows ≥ strategy slow_period)
+    S -->|No| T(Show Data Too Short Error and Abort)
+    S -->|Yes| U(Initialize BacktestEngine)
+    U --> V(Attach Data Feeds to Engine)
+    V --> W(Set Strategy with Parameters)
+    W --> X(Add TimeReturn Analyzer)
+    X --> Y(Run Backtest Engine)
+    Y --> Z(Retrieve TimeReturn Analysis)
+    Z --> AA(Build Cumulative Equity Curve)
+    AA --> AB(Plot Equity Curve on MplCanvas)
+    AB --> AC([End])
