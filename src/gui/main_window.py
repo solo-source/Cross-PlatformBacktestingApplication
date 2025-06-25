@@ -1,305 +1,340 @@
-# # src/gui/main_window.py
-# """
-# MainWindow: PySide6 GUI to load data, run backtests, and view results.
-# """
-#
-# import sys
-# import datetime
-# import pandas as pd
-# import backtrader as bt
-# from PySide6.QtWidgets import (
-#     QApplication, QMainWindow, QFileDialog, QMessageBox,
-#     QWidget, QHBoxLayout, QVBoxLayout, QFormLayout,
-#     QPushButton, QSplitter
-# )
-# from PySide6.QtCore import Qt
-# from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
-#
-# from src.gui.strategy_selector import StrategySelectorWidget
-# from src.utils.logger import logger
-# from src.data.loader import DataLoader
-# from src.data.stream import RestStreamer, WebSocketStreamer
-# from src.backtester.engine import BacktestEngine
-# from src.viz.charts import MplCanvas
-# from src.backtester.strategies import MultiTimeframeSma
-#
-#
-# class MainWindow(QMainWindow):
-#     def __init__(self):
-#         super().__init__()
-#         self.setWindowTitle("Cross-Platform Backtester")
-#         self.resize(1200, 800)
-#
-#         # --- Central Layout ---
-#         main_widget = QWidget()
-#         self.setCentralWidget(main_widget)
-#
-#         splitter = QSplitter()
-#         splitter.setOrientation(Qt.Horizontal)
-#
-#         # Left panel
-#         left_panel = QWidget()
-#         left_layout = QVBoxLayout(left_panel)
-#
-#         # Data loader form
-#         data_form = QFormLayout()
-#         self.csv_btn = QPushButton("Load CSV")
-#         self.csv_btn.clicked.connect(self.load_csv)
-#         data_form.addRow("Historical Data:", self.csv_btn)
-#
-#         self.rest_btn = QPushButton("Start REST Stream")
-#         self.rest_btn.clicked.connect(self.start_rest)
-#         data_form.addRow("REST Stream:", self.rest_btn)
-#
-#         self.ws_btn = QPushButton("Start WS Stream")
-#         self.ws_btn.clicked.connect(self.start_ws)
-#         data_form.addRow("WebSocket Stream:", self.ws_btn)
-#
-#         left_layout.addLayout(data_form)
-#
-#         # Strategy selector
-#         self.strategy_selector = StrategySelectorWidget()
-#         left_layout.addWidget(self.strategy_selector)
-#
-#         # Run button
-#         self.run_btn = QPushButton("Run Backtest")
-#         self.run_btn.clicked.connect(self.run_backtest)
-#         left_layout.addWidget(self.run_btn)
-#
-#         left_layout.addStretch()
-#         splitter.addWidget(left_panel)
-#
-#         # Right panel: chart + toolbar
-#         right_panel = QWidget()
-#         right_layout = QVBoxLayout(right_panel)
-#
-#         self.chart = MplCanvas(self, width=5, height=4, dpi=100)
-#         self.toolbar = NavigationToolbar(self.chart, self)
-#         right_layout.addWidget(self.toolbar)
-#         right_layout.addWidget(self.chart)
-#
-#         splitter.addWidget(right_panel)
-#         splitter.setStretchFactor(1, 3)
-#
-#         main_layout = QHBoxLayout(main_widget)
-#         main_layout.addWidget(splitter)
-#
-#         # Engine and state
-#         self.engine = None
-#         self.data_rows = None
-#         self.rest_streamer = None
-#         self.ws_streamer = None
-#
-#     def load_csv(self):
-#         path, _ = QFileDialog.getOpenFileName(
-#             self, "Open CSV File", "", "CSV Files (*.csv)"
-#         )
-#         if not path:
-#             return
-#
-#         try:
-#             # Only store the path and row count
-#             _, row_count = DataLoader.from_csv(path)
-#             self.csv_path = path
-#             self.data_rows = row_count
-#
-#             QMessageBox.information(
-#                 self, "Success",
-#                 f"Loaded CSV: {path}\n{row_count} bars available."
-#             )
-#
-#         except Exception as e:
-#             logger.exception("Failed to load CSV")
-#             QMessageBox.critical(self, "Error", str(e))
-#
-#     def start_rest(self):
-#         url, _ = QFileDialog.getOpenFileName(
-#             self, "Enter REST URL (in a text file)", "", "Text Files (*.txt)"
-#         )
-#         if not url:
-#             return
-#         try:
-#             rest_url = open(url).read().strip()
-#             self.rest_streamer = RestStreamer(rest_url, interval_s=5)
-#             self.rest_streamer.new_data.connect(self.on_live_data)
-#             self.rest_streamer.start()
-#             QMessageBox.information(self, "REST", f"Polling {rest_url}")
-#         except Exception as e:
-#             logger.exception("Failed to start REST streamer")
-#             QMessageBox.critical(self, "Error", str(e))
-#
-#     def start_ws(self):
-#         try:
-#             ws_url = "wss://stream.binance.com:9443/ws"
-#             subscribe = {"method":"SUBSCRIBE","params":["btcusdt@trade"],"id":1}
-#             self.ws_streamer = WebSocketStreamer(ws_url, subscribe)
-#             self.ws_streamer.new_data.connect(self.on_live_data)
-#             self.ws_streamer.start()
-#             QMessageBox.information(self, "WebSocket", f"Streaming {ws_url}")
-#         except Exception as e:
-#             logger.exception("Failed to start WebSocket streamer")
-#             QMessageBox.critical(self, "Error", str(e))
-#
-#     def on_live_data(self, data: dict):
-#         # TODO: convert to live Backtrader feed or real-time plot update
-#         print("Live data:", data)
-#
-#     def run_backtest(self):
-#         print(">>> run_backtest() start")
-#         logger.info("=== Starting backtest ===")
-#
-#         # 0) Preconditions
-#         if not hasattr(self, 'csv_path') or self.csv_path is None:
-#             logger.error("No csv_path in MainWindow")
-#             QMessageBox.warning(self, "Warning", "Load data first.")
-#             return
-#
-#         # 1) Strategy selection
-#         strat_cls, strat_params = self.strategy_selector.get_strategy()
-#         print(f"Selected strategy: {strat_cls.__name__}, params: {strat_params}")
-#         logger.info(f"Selected strategy: {strat_cls.__name__}, params: {strat_params}")
-#
-#         # 2) Re-create engine
-#         self.engine = BacktestEngine()
-#         print("Engine re-created")
-#         logger.debug("Engine re-created")
-#
-#         # 3) Read CSV into DataFrame
-#         try:
-#             df = pd.read_csv(self.csv_path, parse_dates=['Date'])
-#             df.sort_values('Date', inplace=True)
-#             print(f"CSV reloaded, {len(df)} rows")
-#             logger.debug(f"CSV reloaded, {len(df)} rows")
-#         except Exception as e:
-#             logger.exception("Failed to read CSV")
-#             QMessageBox.critical(self, "Error", f"CSV load error:\n{e}")
-#             return
-#
-#         # 4) Build daily feed
-#         df_daily = df.rename(columns={'Date': 'datetime'}).copy()
-#         df_daily['openinterest'] = 0
-#         daily_feed = bt.feeds.PandasData(
-#             dataname=df_daily,
-#             datetime='datetime',
-#             open='Open', high='High',
-#             low='Low', close='Close',
-#             volume='Volume', openinterest='openinterest'
-#         )
-#         self.engine.add_data(daily_feed)
-#         print("Added daily feed")
-#         logger.debug("Added daily feed")
-#
-#         # 5) If multi-TF, build and add weekly feed
-#         if strat_cls is MultiTimeframeSma:
-#             df_weekly = (
-#                 df.set_index('Date')
-#                 .resample('W')
-#                 .agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'})
-#                 .dropna()
-#                 .reset_index()
-#                 .rename(columns={'Date': 'datetime'})
-#             )
-#             df_weekly['openinterest'] = 0
-#             weekly_feed = bt.feeds.PandasData(
-#                 dataname=df_weekly,
-#                 datetime='datetime',
-#                 open='Open', high='High',
-#                 low='Low', close='Close',
-#                 volume='Volume', openinterest='openinterest'
-#             )
-#             self.engine.add_data(weekly_feed)
-#             print("Added weekly feed for MultiTimeframeSma")
-#             logger.debug("Added weekly feed for MultiTimeframeSma")
-#
-#         # 6) Set strategy & analyzer
-#         self.engine.set_strategy(strat_cls, **strat_params)
-#         self.engine.add_analyzer(bt.analyzers.TimeReturn, _name='timereturn')
-#         print("Strategy and analyzer registered")
-#         logger.debug("Strategy and analyzer registered")
-#
-#         # 7) Debug: inspect cerebro before run
-#         cb = self.engine.cerebro
-#         print(f"Cerebro has {len(cb.datas)} data feeds")
-#         logger.info(f"Cerebro has {len(cb.datas)} data feeds")
-#
-#         # 8) Run
-#         try:
-#             results = cb.run()
-#             print("Cerebro.run() returned:", results)
-#             logger.info(f"Cerebro.run() returned: {results}")
-#         except Exception as e:
-#             logger.exception("Backtest run error")
-#             QMessageBox.critical(self, "Error", f"Backtest error:\n{e}")
-#             return
-#
-#         # 9) Check results
-#         if not results:
-#             print("No strategies returned")
-#             logger.warning("No strategies returned")
-#             QMessageBox.warning(self, "No Strategy",
-#                                 "Cerebro.run() returned no strategy instances.")
-#             return
-#
-#         strat = results[0]
-#         print("Got strategy instance:", strat)
-#         logger.info(f"Got strategy instance: {strat}")
-#
-#         # 10) Build and plot equity curve
-#         tr = strat.analyzers.timereturn.get_analysis()
-#         if not tr:
-#             QMessageBox.warning(self, "No Data", "No return data from analyzer.")
-#             return
-#
-#         dates, equity = [], []
-#         cum_val = cb.broker.startingcash
-#         for dt, ret in sorted(tr.items()):
-#             dates.append(dt if hasattr(dt, 'date') else dt.date())
-#             cum_val *= (1 + ret)
-#             equity.append(cum_val)
-#
-#         self.chart.axes.clear()
-#         self.chart.axes.plot(dates, equity, marker='o', linestyle='-')
-#         self.chart.axes.set_title(f"Equity Curve: {strat_cls.__name__}")
-#         self.chart.axes.set_xlabel("Date")
-#         self.chart.axes.set_ylabel("Portfolio Value")
-#         self.chart.draw()
-#
-#
-# if __name__ == "__main__":
-#     app = QApplication(sys.argv)
-#     w = MainWindow()
-#     w.show()
-#     sys.exit(app.exec())
-
-# src/gui/main.py
-
-
-# # src/gui/main_window.py
+# src/gui/main_window.py
 import sys
-from PySide6.QtWidgets import QApplication
-from src.gui.data_source_dialog import DataSourceDialog
-from src.gui.csv_window import CsvBacktestWindow
-from src.gui.rest_window import RestBacktestWindow
-from src.gui.ws_window import WsBacktestWindow
+import sqlite3
+from datetime import datetime
+from io import BytesIO
 
-def main():
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout,
+    QSplitter, QTabWidget, QPushButton, QLineEdit, QTextEdit,
+    QLabel, QCheckBox, QDateEdit, QFormLayout, QMessageBox,
+    QTableWidget, QTableWidgetItem, QHeaderView, QDialog,
+    QHBoxLayout, QVBoxLayout, QScrollArea
+)
+from PySide6.QtCore import Qt
+
+import backtrader as bt
+from matplotlib.backends.backend_qtagg import (
+    FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
+)
+from matplotlib.figure import Figure
+import matplotlib.dates as mdates
+import numpy as np
+from PySide6.QtGui import QPixmap
+
+# SQLite database file
+DB_PATH = 'snapshots.db'
+TABLE_NAME = 'snapshots'
+
+class ImagePreviewDialog(QDialog):
+    def __init__(self, eq_blob, dd_blob, hist_blob, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Snapshot Preview")
+        # allow interaction
+        scroll = QScrollArea(self)
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        for blob, title in [(eq_blob, 'Equity'), (dd_blob, 'Drawdown'), (hist_blob, 'Histogram')]:
+            pix = QPixmap()
+            pix.loadFromData(blob)
+            label = QLabel()
+            label.setPixmap(pix.scaled(1920, 1080, Qt.KeepAspectRatio))
+            sub = QVBoxLayout()
+            sub.addWidget(QLabel(title))
+            sub.addWidget(label)
+            wrapper = QWidget()
+            wrapper.setLayout(sub)
+            layout.addWidget(wrapper)
+        scroll.setWidget(container)
+        scroll.setWidgetResizable(True)
+        main = QVBoxLayout(self)
+        main.addWidget(scroll)
+        self.resize(820, 620)
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Modular Backtester")
+        self._init_db()
+
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        main_layout = QVBoxLayout(main_widget)
+
+        splitter = QSplitter(Qt.Horizontal)
+        # Left Tools Panel
+        tools_panel = QWidget()
+        tools_layout = QVBoxLayout(tools_panel)
+        from src.gui.data_source_widget import DataSourceWidget
+        from src.gui.strategy_selector_widget import StrategySelectorWidget
+        from src.gui.csv_window import CsvBacktestWindow
+        from src.gui.ws_window import WsBacktestWindow
+
+        self.data_source_widget = DataSourceWidget()
+        tools_layout.addWidget(self.data_source_widget)
+        self.strategy_selector = StrategySelectorWidget()
+        tools_layout.addWidget(self.strategy_selector)
+        # Run Backtest button
+        self.run_button = QPushButton("Run Backtest")
+        self.run_button.clicked.connect(self._run_backtest)
+        tools_layout.addWidget(self.run_button)
+        tools_layout.addStretch()
+        splitter.addWidget(tools_panel)
+
+        # Right Tabs
+        tabs = QTabWidget()
+        # Data Tab
+        data_tab = QWidget()
+        data_layout = QVBoxLayout(data_tab)
+        self.csv_widget = CsvBacktestWindow()
+        data_layout.addWidget(self.csv_widget)
+        self.ws_widget = WsBacktestWindow()
+        data_layout.addWidget(self.ws_widget)
+        tabs.addTab(data_tab, "Data")
+        # Results Tab
+        results_tab = QWidget()
+        results_layout = QVBoxLayout(results_tab)
+        # scroll area for plots
+        scroll = QScrollArea()
+        plot_container = QWidget()
+        plot_layout = QVBoxLayout(plot_container)
+        self._setup_plots(plot_layout)
+        scroll.setWidget(plot_container)
+        scroll.setWidgetResizable(True)
+        results_layout.addWidget(scroll)
+        tabs.addTab(results_tab, "Results")
+        # Upload/History Tab
+        upload_tab = QWidget()
+        upload_layout = QVBoxLayout(upload_tab)
+        form = QFormLayout()
+        # inputs
+        self.symbol_input = QLineEdit()
+        form.addRow("Symbol:", self.symbol_input)
+        self.live_checkbox = QCheckBox()
+        form.addRow("Live:", self.live_checkbox)
+        self.title_input = QLineEdit()
+        form.addRow("Title:", self.title_input)
+        self.desc_input = QLineEdit()
+        form.addRow("Description:", self.desc_input)
+        self.notes_input = QTextEdit()
+        form.addRow("Notes:", self.notes_input)
+        self.date_input = QDateEdit()
+        self.date_input.setDate(datetime.now())
+        self.date_input.setDisplayFormat('yyyy-MM-dd')
+        form.addRow("Date:", self.date_input)
+        upload_layout.addLayout(form)
+        # buttons
+        btn_layout = QHBoxLayout()
+        self.upload_button = QPushButton("Save Snapshot")
+        self.upload_button.clicked.connect(self._upload_snapshot)
+        btn_layout.addWidget(self.upload_button)
+        self.refresh_button = QPushButton("Refresh History")
+        self.refresh_button.clicked.connect(self._load_history)
+        btn_layout.addWidget(self.refresh_button)
+        upload_layout.addLayout(btn_layout)
+        # table
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(['ID','Symbol','Date','Title','Live'])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.cellClicked.connect(self._on_table_click)
+        upload_layout.addWidget(self.table)
+        tabs.addTab(upload_tab, "Upload/History")
+
+        splitter.addWidget(tabs)
+        main_layout.addWidget(splitter)
+
+        # Connect signals
+        self.data_source_widget.sourceChanged.connect(self._on_source_changed)
+        self.strategy_selector.strategyChanged.connect(lambda _: None)
+        # run button moved inside ws/csv windows
+
+        # Initialize
+        self._on_source_changed(self.data_source_widget.current_source)
+        self._load_history()
+
+    def _init_db(self):
+        self.conn = sqlite3.connect(DB_PATH)
+        cur = self.conn.cursor()
+        cur.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
+                id INTEGER PRIMARY KEY,
+                symbol TEXT,
+                live INTEGER,
+                title TEXT,
+                description TEXT,
+                notes TEXT,
+                date TEXT,
+                equity_img BLOB,
+                drawdown_img BLOB,
+                histogram_img BLOB
+            )
+            """
+        )
+        self.conn.commit()
+        cur.close()
+
+    def _setup_plots(self, layout):
+        def make_canvas(title, ax_setup, xlabel, ylabel):
+            layout.addWidget(QLabel(title))
+            canvas = FigureCanvas(Figure(figsize=(8, 4)))
+            toolbar = NavigationToolbar(canvas, self)
+            layout.addWidget(canvas)
+            layout.addWidget(toolbar)
+            ax = canvas.figure.subplots()
+            ax_setup(ax)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
+            canvas.mpl_connect('pick_event', self._on_pick)
+            return canvas, ax
+
+        eq_setup = lambda ax: ax.grid(True)
+        self.eq_canvas, self.eq_ax = make_canvas(
+            "Equity Curve", eq_setup, "Date", "Portfolio Value"
+        )
+        dd_setup = lambda ax: ax.grid(True)
+        self.dd_canvas, self.dd_ax = make_canvas(
+            "Drawdown", dd_setup, "Time", "Drawdown (%)"
+        )
+        hist_setup = lambda ax: ax.grid(True)
+        self.ret_canvas, self.ret_ax = make_canvas(
+            "Returns Distribution", hist_setup, "Returns", "Frequency"
+        )
+
+    def _on_source_changed(self, source):
+        self.csv_widget.setVisible(source == self.data_source_widget.OPTION_CSV)
+        self.ws_widget.setVisible(source == self.data_source_widget.OPTION_WS)
+
+    def _run_backtest(self):
+        """
+        Launches the backtest using the selected data source and strategy,
+        then plots results in the Results tab.
+        """
+        # 1) Retrieve strategy and params
+        try:
+            strat_cls, params = self.strategy_selector.get_strategy()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Strategy selection failed: {e}")
+            return
+
+        # 2) Get data feeds
+        try:
+            if self.data_source_widget.current_source == self.data_source_widget.OPTION_CSV:
+                feeds = self.csv_widget.get_datafeed()
+            else:
+                feeds = self.ws_widget.get_datafeed()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Data feed error: {e}")
+            return
+
+        # 3) Setup Cerebro
+        cerebro = bt.Cerebro()
+        for fd in feeds:
+            cerebro.adddata(fd)
+        cerebro.addstrategy(strat_cls, **params)
+        cerebro.addanalyzer(bt.analyzers.TimeReturn, _name='returns')
+        cerebro.addanalyzer(bt.analyzers.DrawDown, _name='drawdown')
+
+        # 4) Run and collect results
+        try:
+            res = cerebro.run()[0]
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Backtest failed: {e}")
+            return
+
+        pnl = res.analyzers.returns.get_analysis()
+        dd  = res.analyzers.drawdown.get_analysis()
+        dates = list(pnl.keys())
+        vals  = list(pnl.values())
+
+        # 5) Plot Equity Curve
+        self.eq_ax.clear()
+        self.eq_ax.plot(dates, vals, marker='o')
+        self.eq_ax.set_title('Equity Curve')
+        self.eq_ax.set_xlabel('Date')
+        self.eq_ax.set_ylabel('Portfolio Value')
+        self.eq_canvas.draw()
+
+        # 6) Plot Drawdown
+        self.dd_ax.clear()
+        self.dd_ax.plot(dd['drawdown'], marker='x')
+        self.dd_ax.set_title('Drawdown')
+        self.dd_ax.set_xlabel('Time')
+        self.dd_ax.set_ylabel('Drawdown (%)')
+        self.dd_canvas.draw()
+
+        # 7) Plot Returns Distribution
+        rets = np.diff(vals)
+        self.ret_ax.clear()
+        self.ret_ax.hist(rets, bins=30)
+        self.ret_ax.set_title('Returns Distribution')
+        self.ret_ax.set_xlabel('Returns')
+        self.ret_ax.set_ylabel('Frequency')
+        self.ret_canvas.draw()
+
+        # Switch to Results tab
+        try:
+            # assuming tabs index 1 is Results
+            self.centralWidget().findChild(QTabWidget).setCurrentIndex(1)
+        except Exception:
+            pass
+
+    def _upload_snapshot(self):
+        def to_blob(fig):
+            buf = BytesIO()
+            fig.savefig(buf, format='png', dpi=200)
+            return buf.getvalue()
+
+        eq_blob  = to_blob(self.eq_canvas.figure)
+        dd_blob  = to_blob(self.dd_canvas.figure)
+        hist_blob= to_blob(self.ret_canvas.figure)
+
+        cur = self.conn.cursor()
+        cur.execute(
+            f"INSERT INTO {TABLE_NAME} (symbol, live, title, description, notes, date, equity_img, drawdown_img, histogram_img) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                self.symbol_input.text(),
+                int(self.live_checkbox.isChecked()),
+                self.title_input.text(),
+                self.desc_input.text(),
+                self.notes_input.toPlainText(),
+                self.date_input.date().toString('yyyy-MM-dd'),
+                eq_blob, dd_blob, hist_blob
+            )
+        )
+        self.conn.commit()
+        cur.close()
+        QMessageBox.information(self, 'Saved', 'Snapshot saved to database.')
+        self._load_history()
+
+    def _load_history(self):
+        cur = self.conn.cursor()
+        cur.execute(f"SELECT id, symbol, date, title, live FROM {TABLE_NAME} ORDER BY date DESC")
+        rows = cur.fetchall()
+        self.table.setRowCount(len(rows))
+        for i, row in enumerate(rows):
+            for j, val in enumerate(row):
+                self.table.setItem(i, j, QTableWidgetItem(str(val)))
+        cur.close()
+
+    def _on_table_click(self, row, col):
+        cur = self.conn.cursor()
+        snapshot_id = int(self.table.item(row, 0).text())
+        cur.execute(f"SELECT equity_img, drawdown_img, histogram_img FROM {TABLE_NAME} WHERE id = ?", (snapshot_id,))
+        eq, dd, hist = cur.fetchone()
+        cur.close()
+        dlg = ImagePreviewDialog(eq, dd, hist, self)
+        dlg.exec()
+
+    def _on_pick(self, event):
+        """
+        Handler for matplotlib pick events; currently no-op.
+        """
+        pass
+
+if __name__ == '__main__':
     app = QApplication(sys.argv)
-
-    # 1) Show the data‐source selection dialog
-    dlg = DataSourceDialog()
-    if dlg.exec() != DataSourceDialog.Accepted:
-        sys.exit(0)
-
-    choice = dlg.selected_option()
-    if choice == DataSourceDialog.OPTION_CSV:
-        window = CsvBacktestWindow()
-    elif choice == DataSourceDialog.OPTION_REST:
-        window = RestBacktestWindow()
-    else:  # DataSourceDialog.OPTION_WS
-        window = WsBacktestWindow()
-
-    window.show()
+    window = MainWindow()
+    window.showMaximized()
     sys.exit(app.exec())
-
-if __name__ == "__main__":
-    main()

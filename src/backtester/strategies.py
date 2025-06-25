@@ -353,6 +353,8 @@ class MultiTimeframeSma(bt.Strategy):
     )
 
     def __init__(self):
+        if len(self.datas) < 2:
+            raise ValueError("MultiTimeframeSma requires two data feeds: daily and weekly")
         # Primary feed (intraday/day) at datas[0]
         price = self.datas[0].close
         self.fast = bt.indicators.SMA(price, period=self.p.fast)
