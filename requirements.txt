@@ -1,7 +1,18 @@
+# Core Backtesting and Finance
 backtrader
 yfinance
-PySide6
 matplotlib
 pandas
+numpy
 requests
+
+# GUI
+PySide6
+matplotlib
+
+# Testing
 pytest
+pytest-qt
+
+# Optional Enhancements
+python-dateutil
