@@ -1,106 +1,139 @@
-# Cross-Platform Backtesting App
+# Cross-Platform Backtesting Application
 
-A modular, open-source GUI application for backtesting trading strategies, built with:
+A modular, open-source desktop GUI application for backtesting trading strategies using historical or live market data.
 
-- **Backtrader** as the core backtesting engine  
-- **PySide6 (Qt for Python)** for a responsive, cross-platform desktop GUI  
-- **Historical data** support (CSV files & Yahoo Finance via `yfinance`)  
-- **Live data** support out of the box  
-  - **REST polling** (any JSON-returning endpoint)  
-  - **WebSocket streaming** (e.g. Binance, Coinbase, or custom feeds)  
-- **Built-in strategies** (e.g. SMA crossover with stop-loss and take-profit)  
-- **Custom strategy configuration** via GUI dialog  
-- **Embedded Matplotlib charts** for equity curves, price series, and indicators  
-- **Comprehensive logging** and error handling  
+---
 
----  
+## 🚀 Features
 
-## Features
+### ✅ Backtesting Engine
+- Built on top of [Backtrader](https://www.backtrader.com/)
+- Support for multiple data sources:
+  - CSV-based historical OHLCV
+  - Real-time feeds via WebSocket from Yahoo Finance (`yfinance`)
 
-- **Historical Backtesting**  
-  - Load OHLCV CSV files (`Date,Open,High,Low,Close,Volume`)  
-  - Fetch data from Yahoo Finance (`yfinance`)  
-- **Live Data Streaming**  
-  - REST endpoint polling with configurable interval  
-  - WebSocket subscription for real-time price updates  
-- **Strategy Configuration**  
-  - SMA crossover with risk controls (stop-loss, take-profit, position sizing)  
-  - Extendable to custom strategies via GUI  
-- **Visualization**  
-  - Equity curve, price chart, and performance metrics displayed in-app  
-- **Logging & Diagnostics**  
-  - All errors and key events logged to `app.log`  
-  - User notifications via dialog boxes  
+### ✅ GUI Interface (PySide6)
+- Intuitive layout: Data source panel, strategy selector, results viewer
+- Modular tabbed interface (Data, Results, Upload/History)
+- Embedded interactive Matplotlib charts:
+  - Equity Curve
+  - Drawdown
+  - Returns Distribution
 
----  
+### ✅ Strategy Configuration
+- Strategy selector with parameter customization
+- SMA crossover and multi-timeframe examples included
+- Supports custom user-defined strategies
 
-## Installation (Fedora Linux)
+### ✅ Snapshot & History
+- Save snapshot (charts + metadata) to SQLite DB
+- View saved snapshots in scrollable preview
+- Interactive image display for Equity, Drawdown, Histogram
 
-1. **Install system dependencies**  
-   ```bash
-   sudo dnf install python3 python3-venv python3-pip
-   git clone https://github.com/solo-source/backtester_app.git
-   cd backtester_app
+### ✅ Logging & Testing
+- Logs saved to `app.log`
+- Unit tests with `pytest` and `pytest-qt` for GUI testing
 
-Create and activate a virtual environment
+---
 
-    python3 -m venv venv
-    source venv/bin/activate
+## 🛠️ Installation
 
-Install Python dependencies
+### Prerequisites
+- Python 3.8+
+- Linux (tested on Fedora), Windows, macOS
 
-    pip install -r requirements.txt
+### Setup
+```bash
+# System dependencies (Fedora)
+sudo dnf install python3 python3-venv python3-pip git
 
-Quick Start
+# Clone repository
+git clone https://github.com/solo-source/backtester_app.git
+cd backtester_app
 
-    Run the application
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
 
-    python -m src.gui.main_window
+# Install Python dependencies
+pip install -r requirements.txt
+```
 
-Load historical data
+---
 
-        Click Load CSV and select a CSV file with headers Date,Open,High,Low,Close,Volume.
+## 🚦 Quick Start
 
-        (Optional) Click Load Yahoo (future enhancement) to fetch from Yahoo Finance.
+```bash
+python -m src.gui.main_window
+```
 
-Start live data stream
+### Load Data
+- Click **Load CSV** and select a file with `Date,Open,High,Low,Close,Volume` columns.
+- (Live data via WebSocket polling supported; REST feed also supported.)
 
-        REST: Prepare a text file containing your REST API URL, click Start REST Stream, and select that file.
+### Run Strategy
+- Choose a strategy (e.g., SmaCross).
+- Enter parameters like `sma_short` and `sma_long`.
+- Click **Run Backtest**.
 
-        WebSocket: Click Start WS Stream (defaults to Binance’s BTC/USDT trades).
+### View Results
+- Navigate to the **Results** tab to view:
+  - Equity curve
+  - Drawdown chart
+  - Returns histogram
+- All plots are interactive and zoomable.
 
-Configure and run strategy
+---
 
-        Enter SMA Short and SMA Long periods on the left panel.
+## 💾 Snapshots & History
 
-        Click Run Backtest.
+- Save snapshots via the **Upload/History** tab.
+- View previous runs and load saved plots interactively.
+- Data stored in `snapshots.db` SQLite file.
 
-View results
+---
 
-        Chart updates in the right panel (price series or equity curve).
+## 🧪 Running Tests
 
-        Check performance metrics printed in console or displayed within the GUI.
+```bash
+pytest
+```
 
-        Review app.log for detailed logs and any error messages.
+Tests are located in the `tests/` folder:
+- CSV loading
+- Backtest engine integration
+- Strategy validation
+- GUI component behavior (`pytest-qt`)
 
-Testing
+---
 
-Run unit and integration tests with pytest:
+## 📁 Project Structure
 
-    pytest
+```
+src/
+├── backtester/         # Core engine logic
+├── data/               # Data loading modules (CSV, REST, WebSocket)
+├── gui/                # PySide6 GUI modules
+├── utils/              # Logging and utility helpers
+├── viz/                # Chart canvas and Matplotlib setup
+tests/                  # Test cases for engine, loader, GUI
+snapshots.db            # SQLite database of saved snapshots
+requirements.txt
+README.md
+```
 
-Tests cover data loading, strategy execution, and engine integration.
-Extending & Contributing
+---
 
-    Add new strategies: Edit or add classes in src/backtester/strategies.py.
+## 🔧 Extending
 
-    New data sources: Extend src/data/loader.py (historical) or src/data/stream.py (live).
+- Add strategies in `src/backtester/strategies.py`
+- Add new loaders in `src/data/`
+- Modify GUI in `src/gui/`
+- Submit pull requests and open issues on GitHub!
 
-    Improve UI: Modify or add dialogs in src/gui/.
+---
 
-    Submit issues or PRs on GitHub—this project is open-source and community-driven!
+## 📄 License
 
-License
-
-This project is licensed under the MIT License. See LICENSE for details.
-
+This project is licensed under the MIT License.  
+See `LICENSE` for details.
