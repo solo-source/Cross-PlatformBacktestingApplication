@@ -230,6 +230,7 @@ class MainWindow(QMainWindow):
 
         # 3) Setup Cerebro
         cerebro = bt.Cerebro()
+        print("RUNNING BACKTEST WITH FEEDS:", feeds)
         for fd in feeds:
             cerebro.adddata(fd)
         cerebro.addstrategy(strat_cls, **params)
