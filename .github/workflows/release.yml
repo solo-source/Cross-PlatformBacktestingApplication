@@ -41,29 +41,31 @@ jobs:
             asset_name: ModularBacktester-linux
             build_mode: onefile
             add_data_sep: ':'
-            path: dist/ModularBacktester
+            asset_path: 'dist/ModularBacktester'
           - os: windows-latest
             exe_name: ModularBacktester.exe
             asset_name: ModularBacktester-windows.exe
             build_mode: onefile
             add_data_sep: ';'
-            path: dist/ModularBacktester.exe
+            asset_path: 'dist/ModularBacktester.exe'
           - os: macos-latest
             exe_name: ModularBacktester.app
             asset_name: ModularBacktester-macos.zip
             build_mode: onedir
             add_data_sep: ':'
-            path: dist/ModularBacktester-macos.zip
+            asset_path: 'dist/ModularBacktester-macos.zip'
     steps:
       - uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+
       - name: Install PyInstaller
         run: pip install pyinstaller
 
-            - name: Build binary (Unix)
+      - name: Build binary (Unix)
         if: matrix.os != 'windows-latest'
         shell: bash
         run: |
@@ -73,12 +75,10 @@ jobs:
                        --add-data "assets${{ matrix.add_data_sep }}assets" \
                        src/gui/main_window.py
           else
-            # onedir mode for macOS .app bundle
             pyinstaller --name "ModularBacktester" --onedir --windowed \
                        --add-data "templates${{ matrix.add_data_sep }}templates" \
                        --add-data "assets${{ matrix.add_data_sep }}assets" \
                        src/gui/main_window.py
-            # zip the .app directory
             cd dist
             zip -r "ModularBacktester-macos.zip" "ModularBacktester.app"
             cd ..
@@ -91,22 +91,7 @@ jobs:
           pyinstaller --name "${{ matrix.exe_name }}" --onefile --windowed \
                      --add-data "templates${{ matrix.add_data_sep }}templates" \
                      --add-data "assets${{ matrix.add_data_sep }}assets" \
-                     src/gui/main_window.pyle" ]; then
-            pyinstaller --name "${{ matrix.exe_name }}" --onefile --windowed \
-                       --add-data "templates${{ matrix.add_data_sep }}templates" \
-                       --add-data "assets${{ matrix.add_data_sep }}assets" \
-                       src/gui/main_window.py
-          else
-            # onedir mode for macOS .app bundle
-            pyinstaller --name "ModularBacktester" --onedir --windowed \
-                       --add-data "templates${{ matrix.add_data_sep }}templates" \
-                       --add-data "assets${{ matrix.add_data_sep }}assets" \
-                       src/gui/main_window.py
-            # zip the .app directory
-            cd dist
-            zip -r "ModularBacktester-macos.zip" "ModularBacktester.app"
-            cd ..
-          fi
+                     src/gui/main_window.py
 
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
@@ -114,6 +99,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: ${{ matrix.path }}
+          asset_path: ${{ matrix.asset_path }}
           asset_name: ${{ matrix.asset_name }}
           asset_content_type: application/octet-stream
