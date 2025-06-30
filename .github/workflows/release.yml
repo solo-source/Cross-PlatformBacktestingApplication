@@ -53,14 +53,6 @@ jobs:
             asset_name: ModularBacktester-macos.zip
             add_data_sep: ':'
             asset_path: 'dist/ModularBacktester.app.zip'
-          - os: windows-latest
-            exe_name: ModularBacktester.exe
-            asset_name: ModularBacktester-windows.exe
-            add_data_sep: ';'
-          - os: macos-latest
-            exe_name: ModularBacktester.app
-            asset_name: ModularBacktester-macos.zip
-            add_data_sep: ':'
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
@@ -74,24 +66,27 @@ jobs:
       - name: Install PyInstaller
         run: pip install pyinstaller
 
-      - name: Build Executable
+      - name: Build on Linux/macOS
+        if: matrix.os != 'windows-latest'
         run: |
-          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            # Build .app then zip
-            pyinstaller --name ModularBacktester --onefile --windowed \
-                       --add-data "templates${{ matrix.add_data_sep }}templates" \
-                       --add-data "assets${{ matrix.add_data_sep }}assets" \
-                       src/gui/main_window.py
+          pyinstaller --name "${{ matrix.exe_name }}" --onefile --windowed \
+                     --add-data "templates${{ matrix.add_data_sep }}templates" \
+                     --add-data "assets${{ matrix.add_data_sep }}assets" \
+                     src/gui/main_window.py
+          if [ "${{ matrix.os }}" == 'macos-latest' ]; then
             cd dist
-            zip -r "${{ matrix.exe_name }}.zip" "${{ matrix.exe_name }}"
+            zip -r "${{ matrix.asset_path }}" "${{ matrix.exe_name }}"
             cd ..
-          else
-            # Linux or Windows
-            pyinstaller --name "${{ matrix.exe_name }}" --onefile $([[ "${{ matrix.os }}" == "windows-latest" ]] && echo "--windowed") \
-                       --add-data "templates${{ matrix.add_data_sep }}templates" \
-                       --add-data "assets${{ matrix.add_data_sep }}assets" \
-                       src/gui/main_window.py
           fi
+
+      - name: Build on Windows
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          pyinstaller --name "${{ matrix.exe_name }}" --onefile --windowed \
+                     --add-data "templates${{ matrix.add_data_sep }}templates" \
+                     --add-data "assets${{ matrix.add_data_sep }}assets" \
+                     src/gui/main_window.py
 
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
