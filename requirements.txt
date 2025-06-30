@@ -5,6 +5,9 @@ matplotlib
 pandas
 numpy
 requests
+plotly
+jinja2
+weasyprint
 
 # GUI
 PySide6
@@ -13,6 +16,7 @@ matplotlib
 # Testing
 pytest
 pytest-qt
+pytest-mock
 
 # Optional Enhancements
 python-dateutil

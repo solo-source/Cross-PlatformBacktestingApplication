@@ -1,6 +1,7 @@
 # src/gui/main_window.py
 import sys
 import sqlite3
+import os
 from datetime import datetime
 from io import BytesIO
 
@@ -12,6 +13,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QScrollArea
 )
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QHeaderView
+from src.gui.report_generator import ReportGenerator
+from PySide6.QtWidgets import QPushButton, QFileDialog
+
+from PySide6.QtWebEngineWidgets import QWebEngineView
+import plotly.graph_objs as go
+from plotly.subplots import make_subplots
 
 import backtrader as bt
 from matplotlib.backends.backend_qtagg import (
@@ -115,11 +123,16 @@ class MainWindow(QMainWindow):
         tools_layout.addStretch()
         splitter.addWidget(tools_panel)
 
-        #optimize button
+        # Optimize button
         self.optimize_button = QPushButton("Optimize Strategy")
         self.optimize_button.clicked.connect(self._open_optimization_dialog)
         tools_layout.addWidget(self.optimize_button)
         tools_layout.addStretch()
+
+        #export report button
+        self.export_button = QPushButton("Export Report")
+        self.export_button.clicked.connect(self._export_report)
+        tools_layout.addWidget(self.export_button)
 
         # Right Tabs
         tabs = QTabWidget()
@@ -131,23 +144,30 @@ class MainWindow(QMainWindow):
         self.ws_widget = WsBacktestWindow()
         data_layout.addWidget(self.ws_widget)
         tabs.addTab(data_tab, "Data")
+
         # Results Tab
         results_tab = QWidget()
         results_layout = QVBoxLayout(results_tab)
-        # scroll area for plots
-        scroll = QScrollArea()
-        plot_container = QWidget()
-        plot_layout = QVBoxLayout(plot_container)
-        self._setup_plots(plot_layout)
-        scroll.setWidget(plot_container)
-        scroll.setWidgetResizable(True)
-        results_layout.addWidget(scroll)
+        # Plotly view for interactive charts
+        self.plotly_view = QWebEngineView()
+        results_layout.addWidget(self.plotly_view)
         tabs.addTab(results_tab, "Results")
+
+        # Metrics Tab
+        metrics_tab = QWidget()
+        metrics_layout = QVBoxLayout(metrics_tab)
+        self.metrics_table = QTableWidget(0, 2)
+        self.metrics_table.setHorizontalHeaderLabels(["Metric", "Value"])
+        self.metrics_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.metrics_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.metrics_table.setMinimumHeight(200)
+        metrics_layout.addWidget(self.metrics_table)
+        tabs.addTab(metrics_tab, "Metrics")
+
         # Upload/History Tab
         upload_tab = QWidget()
         upload_layout = QVBoxLayout(upload_tab)
         form = QFormLayout()
-        # inputs
         self.symbol_input = QLineEdit()
         form.addRow("Symbol:", self.symbol_input)
         self.live_checkbox = QCheckBox()
@@ -163,7 +183,6 @@ class MainWindow(QMainWindow):
         self.date_input.setDisplayFormat('yyyy-MM-dd')
         form.addRow("Date:", self.date_input)
         upload_layout.addLayout(form)
-        # buttons
         btn_layout = QHBoxLayout()
         self.upload_button = QPushButton("Save Snapshot")
         self.upload_button.clicked.connect(self._upload_snapshot)
@@ -172,10 +191,9 @@ class MainWindow(QMainWindow):
         self.refresh_button.clicked.connect(self._load_history)
         btn_layout.addWidget(self.refresh_button)
         upload_layout.addLayout(btn_layout)
-        # table
         self.table = QTableWidget()
         self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(['ID','Symbol','Date','Title','Live'])
+        self.table.setHorizontalHeaderLabels(['ID', 'Symbol', 'Date', 'Title', 'Live'])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.cellClicked.connect(self._on_table_click)
         upload_layout.addWidget(self.table)
@@ -184,10 +202,10 @@ class MainWindow(QMainWindow):
         splitter.addWidget(tabs)
         main_layout.addWidget(splitter)
 
+
         # Connect signals
         self.data_source_widget.sourceChanged.connect(self._on_source_changed)
         self.strategy_selector.strategyChanged.connect(lambda _: None)
-        # run button moved inside ws/csv windows
 
         # Initialize
         self._on_source_changed(self.data_source_widget.current_source)
@@ -261,6 +279,8 @@ class MainWindow(QMainWindow):
         dlg.exec_()
 
     def _run_backtest(self):
+        self.last_pnl = {}
+        self.last_trade_analysis = None
         """
         Launches the backtest using the selected data source and strategy,
         then plots results in the Results tab.
@@ -291,6 +311,7 @@ class MainWindow(QMainWindow):
         cerebro.addanalyzer(bt.analyzers.TimeReturn, _name='returns')
         cerebro.addanalyzer(bt.analyzers.DrawDown, _name='drawdown')
 
+        cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name='trade')
         # 4) Run and collect results
         try:
             res = cerebro.run()[0]
@@ -299,34 +320,120 @@ class MainWindow(QMainWindow):
             return
 
         pnl = res.analyzers.returns.get_analysis()
+        # --- BEGIN FALLBACK FOR EMPTY PNL ---
+        if not pnl:
+            # No return series (e.g. flat data) → use starting and ending cash
+            start_cash = cerebro.broker.startingcash if hasattr(cerebro.broker,'startingcash') else cerebro.broker.getcash()
+            end_cash = res.broker.getvalue()
+            pnl = {0: start_cash, 1: end_cash}
+        # --- END FALLBACK ---
+        self.last_pnl = pnl
         dd  = res.analyzers.drawdown.get_analysis()
+        ta = res.analyzers.trade.get_analysis()
+        self.last_trade_analysis = res.analyzers.trade.get_analysis()
+
+        # dates = list(pnl.keys())
+        # vals  = list(pnl.values())
+
+        # Prepare series
         dates = list(pnl.keys())
-        vals  = list(pnl.values())
+        equity_vals = np.array(list(pnl.values()))
+        # Safe drawdown calculation: avoid divide-by-zero
+        cummax = np.maximum.accumulate(equity_vals)
+        drawdown_pct = np.where(cummax > 0, (equity_vals - cummax) / cummax * 100, 0)
 
-        # 5) Plot Equity Curve
-        self.eq_ax.clear()
-        self.eq_ax.plot(dates, vals, marker='o')
-        self.eq_ax.set_title('Equity Curve')
-        self.eq_ax.set_xlabel('Date')
-        self.eq_ax.set_ylabel('Portfolio Value')
-        self.eq_canvas.draw()
+        # Returns series and rolling metrics
+        returns = np.diff(equity_vals)
+        rolling_sharpe = []
+        window = 20  # 20-period rolling
+        for i in range(len(returns)):
+            if i < window:
+                rolling_sharpe.append(None)
+            else:
+                rw = returns[i - window + 1:i + 1]
+                sr = (np.mean(rw) / np.std(rw, ddof=1)) * np.sqrt(window) if np.std(rw, ddof=1) != 0 else 0
+                rolling_sharpe.append(sr)
+        # pad to full length
+        rolling_sharpe = [None] + rolling_sharpe  # align length with dates
 
-        # 6) Plot Drawdown
-        self.dd_ax.clear()
-        self.dd_ax.plot(dd['drawdown'], marker='x')
-        self.dd_ax.set_title('Drawdown')
-        self.dd_ax.set_xlabel('Time')
-        self.dd_ax.set_ylabel('Drawdown (%)')
-        self.dd_canvas.draw()
+        # Build a 2x2 dashboard: equity, drawdown, returns hist, rolling Sharpe
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=('Equity Curve', 'Drawdown (%)', 'Returns Distribution', 'Rolling Sharpe'),
+            vertical_spacing=0.2, horizontal_spacing=0.1
+        )
+        # Equity Curve
+        fig.add_trace(go.Scatter(x=dates, y=equity_vals, mode='lines', name='Equity'), row=1, col=1)
+        # Drawdown
+        fig.add_trace(go.Bar(x=dates, y=drawdown_pct, name='Drawdown'), row=1, col=2)
+        # Returns Histogram
+        fig.add_trace(go.Histogram(x=returns, nbinsx=30, name='Returns'), row=2, col=1)
+        # Rolling Sharpe
+        fig.add_trace(go.Scatter(x=dates, y=rolling_sharpe, mode='lines', name='Rolling Sharpe'), row=2, col=2)
 
-        # 7) Plot Returns Distribution
-        rets = np.diff(vals)
-        self.ret_ax.clear()
-        self.ret_ax.hist(rets, bins=30)
-        self.ret_ax.set_title('Returns Distribution')
-        self.ret_ax.set_xlabel('Returns')
-        self.ret_ax.set_ylabel('Frequency')
-        self.ret_canvas.draw()
+        fig.update_layout(
+            title='Backtest Performance Dashboard',
+            height=800, width=1200,
+            showlegend=False
+        )
+
+        # Render and display
+        html_str = fig.to_html(include_plotlyjs='cdn')
+        self.plotly_view.setHtml(html_str)
+
+        self.eq_plot = go.Figure(go.Scatter(x=dates, y=equity_vals, mode='lines'))
+        self.dd_plot = go.Figure(go.Bar(x=dates, y=drawdown_pct))
+        self.ret_plot = go.Figure(go.Histogram(x=np.diff(equity_vals), nbinsx=30))
+
+
+        # Compute metrics
+        total_trades = getattr(getattr(ta, 'total', {}), 'closed', 0)
+        wins = getattr(getattr(ta, 'won', {}), 'total', 0)
+        losses = getattr(getattr(ta, 'lost', {}), 'total', 0)
+        win_rate = (wins / total_trades * 100) if total_trades else 0
+        # Gather per-trade durations and profits if available
+        hold_times = []
+        profits = []
+        try:
+            trades = ta.trades  # may KeyError if not present
+        except KeyError:
+            trades = {}
+        for t in trades.values():
+            hold_times.append(t.get('duration', 0))
+            profits.append(t.get('profit', 0))
+        avg_hold = (sum(hold_times) / len(hold_times)) if hold_times else 0
+        # average profit/loss
+        avg_profit = (sum(p for p in profits if p > 0) / wins) if wins else 0
+        avg_loss = (sum(p for p in profits if p < 0) / losses) if losses else 0
+        # expectancy = win_rate% * avg_profit + loss_rate% * avg_loss
+        expectancy = ((wins / total_trades) * avg_profit + (losses / total_trades) * avg_loss) if total_trades else 0
+
+        # max consecutive losses
+        def get_attr_safe(obj, name):
+            try:
+                return getattr(obj, name)
+            except Exception:
+                return 0
+
+        max_consec_loss = get_attr_safe(getattr(ta, 'streak', {}), 'down')
+
+        # 4. Populate metrics table:
+        # ---------------------------
+        self.metrics_table.setRowCount(0)
+        metrics = [
+            ("Total Trades", total_trades),
+            ("Winning Trades", wins),
+            ("Losing Trades", losses),
+            ("Win Rate (%)", f"{win_rate:.2f}"),
+            ("Avg Hold Time (bars)", f"{avg_hold:.1f}"),
+            ("Expectancy", f"{expectancy:.2f}"),
+            ("Max Consecutive Losses", max_consec_loss)
+        ]
+        for i, (label, value) in enumerate(metrics):
+            self.metrics_table.insertRow(i)
+            self.metrics_table.setItem(i, 0, QTableWidgetItem(str(label)))
+            self.metrics_table.setItem(i, 1, QTableWidgetItem(str(value)))
+        self.metrics_table.resizeColumnsToContents()
 
         # Switch to Results tab
         try:
@@ -335,19 +442,181 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _export_report(self):
+        """
+        Gather the latest backtest data (equity, drawdown, returns, metrics, trades) and generate HTML and PDF reports.
+        """
+        # Ensure we have run results
+        if not hasattr(self, 'last_pnl') or not self.last_pnl:
+            QMessageBox.warning(self, "No Data", "Run a backtest before exporting a report.")
+            return
+
+        # Prepare series
+        dates = list(self.last_pnl.keys())
+        equity_vals = list(self.last_pnl.values())
+
+        # Drawdown and returns
+        import numpy as np
+        equity_arr = np.array(equity_vals)
+        cummax = np.maximum.accumulate(equity_arr)
+        drawdown_pct = np.where(cummax > 0,
+                                (equity_arr - cummax) / cummax * 100,
+                                0).tolist()
+        returns = np.diff(equity_arr).tolist()
+
+        # Trade metrics and log
+        ta = getattr(self, 'last_trade_analysis', None)
+        metrics = {}
+        trades_table = []
+        if ta:
+            total = getattr(getattr(ta, 'total', {}), 'closed', 0)
+            won = getattr(getattr(ta, 'won', {}), 'total', 0)
+            lost = getattr(getattr(ta, 'lost', {}), 'total', 0)
+            win_rate = (won / total * 100) if total else 0
+            metrics = {
+                'Total Trades': total,
+                'Winning Trades': won,
+                'Losing Trades': lost,
+                'Win Rate (%)': f"{win_rate:.2f}"
+            }
+            try:
+                trades_dict = ta.trades
+            except KeyError:
+                trades_dict = {}
+            for tradeid, t in trades_dict.items():
+                entry = t.get('entrybar', '')
+                exit_ = t.get('exitbar', '')
+                profit = t.get('profit', 0)
+                duration = t.get('duration', 0)
+                trades_table.append({
+                    'Trade ID': tradeid,
+                    'Entry Bar': entry,
+                    'Exit Bar': exit_,
+                    'Profit': profit,
+                    'Duration': duration
+                })
+        else:
+            metrics = {self.metrics_table.item(i, 0).text(): self.metrics_table.item(i, 1).text()
+                       for i in range(self.metrics_table.rowCount())}
+
+        # Ask user where to save
+        pdf_path, _ = QFileDialog.getSaveFileName(self, "Save Report", "", "PDF Files (*.pdf)")
+        if not pdf_path:
+            return
+        if not pdf_path.lower().endswith('.pdf'):
+            pdf_path += '.pdf'
+
+        # Generate embedded Plotly divs from stored figures
+        equity_div = self.eq_plot.to_html(full_html=False, include_plotlyjs='cdn') if hasattr(self,
+                                                                                              'eq_plot') else "<p>No Equity Chart</p>"
+        drawdown_div = self.dd_plot.to_html(full_html=False, include_plotlyjs='cdn') if hasattr(self,
+                                                                                                'dd_plot') else "<p>No Drawdown Chart</p>"
+        returns_div = self.ret_plot.to_html(full_html=False, include_plotlyjs='cdn') if hasattr(self,
+                                                                                                'ret_plot') else "<p>No Returns Chart</p>"
+
+        # Build context for report
+        context = {
+            'title': f"Backtest Report: {self.title_input.text()}",
+            'date': self.date_input.date().toString('yyyy-MM-dd'),
+            'equity_div': equity_div,
+            'drawdown_div': drawdown_div,
+            'returns_div': returns_div,
+            'metrics': metrics,
+            'trades_table': trades_table,
+            'final_value': f"{equity_vals[-1]:.2f}",
+            'max_drawdown': f"{min(drawdown_pct):.2f}%",
+            'cagr': (lambda ev: f"{(((ev[-1]/ev[0])**(1/(len(ev)-1))) - 1)*100:.2f}%" if len(ev)>1 and ev[0]!=0 else "0.00%")(equity_vals)
+        }
+
+        # Generate and save report
+        rg = ReportGenerator(template_dir=os.path.join(os.path.dirname(__file__), '../../templates'))
+        try:
+            html_file, pdf_file = rg.generate_report(context, output_dir=os.getcwd(),
+                                                     filename=os.path.basename(pdf_path))
+            QMessageBox.information(self, 'Report Saved', f"Report saved as:{pdf_file}")
+
+            # # Optional: export CSV of trades
+            # if trades_table:
+            #     import csv
+            # csv_path = pdf_path.replace('.pdf', '_trades.csv')
+            # with open(csv_path, 'w', newline='') as f:
+            #     writer = csv.DictWriter(f, fieldnames=trades_table[0].keys())
+            # writer.writeheader()
+            # writer.writerows(trades_table)
+        except Exception as e:
+            QMessageBox.critical(self, 'Export Error', str(e))
+
     def _upload_snapshot(self):
-        def to_blob(fig):
-            buf = BytesIO()
-            fig.savefig(buf, format='png', dpi=200)
-            return buf.getvalue()
+        """
+        Capture the last run’s charts (equity, drawdown, returns) via Plotly
+        and save them to the SQLite database as PNG blobs.
+        """
+        import numpy as np
+        import plotly.graph_objs as go
+        import plotly.io as pio
+        from io import BytesIO
 
-        eq_blob  = to_blob(self.eq_canvas.figure)
-        dd_blob  = to_blob(self.dd_canvas.figure)
-        hist_blob= to_blob(self.ret_canvas.figure)
+        # 1) Validate that we've run a backtest and have PnL
+        if not hasattr(self, 'last_pnl') or not self.last_pnl:
+            QMessageBox.warning(self, "No Backtest", "Please run a backtest before saving a snapshot.")
+            return
 
+        # 2) Prepare series
+        dates = list(self.last_pnl.keys())
+        equity_vals = np.array(list(self.last_pnl.values()))
+
+        # Drawdown series (%)
+        cummax = np.maximum.accumulate(equity_vals)
+        drawdown_pct = np.where(cummax > 0,
+                                (equity_vals - cummax) / cummax * 100,
+                                0)
+
+        # Returns series
+        returns = np.diff(equity_vals)
+
+        # 3) Build Plotly figures
+        # 3.1 Equity Curve
+        eq_fig = go.Figure(go.Scatter(
+            x=dates, y=equity_vals, mode='lines', name='Equity'
+        ))
+        eq_fig.update_layout(
+            title='Equity Curve',
+            xaxis_title='Date',
+            yaxis_title='Portfolio Value'
+        )
+
+        # 3.2 Drawdown
+        dd_fig = go.Figure(go.Bar(
+            x=dates, y=drawdown_pct.tolist(), name='Drawdown'
+        ))
+        dd_fig.update_layout(
+            title='Drawdown (%)',
+            xaxis_title='Date',
+            yaxis_title='Drawdown (%)'
+        )
+
+        # 3.3 Returns Distribution
+        hist_fig = go.Figure(go.Histogram(
+            x=returns, nbinsx=30, name='Returns'
+        ))
+        hist_fig.update_layout(
+            title='Returns Distribution',
+            xaxis_title='Returns',
+            yaxis_title='Frequency'
+        )
+
+        # 4) Convert figures to PNG blobs via Kaleido
+        #    Requires `pip install kaleido`
+        eq_blob   = pio.to_image(eq_fig, format='png', width=1080, height=700, scale=2)
+        dd_blob   = pio.to_image(dd_fig, format='png', width=1080, height=700, scale=2)
+        hist_blob = pio.to_image(hist_fig, format='png', width=1080, height=700, scale=2)
+
+        # 5) Write to SQLite
         cur = self.conn.cursor()
         cur.execute(
-            f"INSERT INTO {TABLE_NAME} (symbol, live, title, description, notes, date, equity_img, drawdown_img, histogram_img) VALUES (?,?,?,?,?,?,?,?,?)",
+            f"INSERT INTO {TABLE_NAME} "
+            "(symbol, live, title, description, notes, date, equity_img, drawdown_img, histogram_img) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             (
                 self.symbol_input.text(),
                 int(self.live_checkbox.isChecked()),
@@ -360,6 +629,7 @@ class MainWindow(QMainWindow):
         )
         self.conn.commit()
         cur.close()
+
         QMessageBox.information(self, 'Saved', 'Snapshot saved to database.')
         self._load_history()
 
