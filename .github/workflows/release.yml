@@ -63,9 +63,35 @@ jobs:
       - name: Install PyInstaller
         run: pip install pyinstaller
 
-      - name: Build binary
+            - name: Build binary (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
         run: |
           if [ "${{ matrix.build_mode }}" = "onefile" ]; then
+            pyinstaller --name "${{ matrix.exe_name }}" --onefile --windowed \
+                       --add-data "templates${{ matrix.add_data_sep }}templates" \
+                       --add-data "assets${{ matrix.add_data_sep }}assets" \
+                       src/gui/main_window.py
+          else
+            # onedir mode for macOS .app bundle
+            pyinstaller --name "ModularBacktester" --onedir --windowed \
+                       --add-data "templates${{ matrix.add_data_sep }}templates" \
+                       --add-data "assets${{ matrix.add_data_sep }}assets" \
+                       src/gui/main_window.py
+            # zip the .app directory
+            cd dist
+            zip -r "ModularBacktester-macos.zip" "ModularBacktester.app"
+            cd ..
+          fi
+
+      - name: Build binary (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          pyinstaller --name "${{ matrix.exe_name }}" --onefile --windowed \
+                     --add-data "templates${{ matrix.add_data_sep }}templates" \
+                     --add-data "assets${{ matrix.add_data_sep }}assets" \
+                     src/gui/main_window.pyle" ]; then
             pyinstaller --name "${{ matrix.exe_name }}" --onefile --windowed \
                        --add-data "templates${{ matrix.add_data_sep }}templates" \
                        --add-data "assets${{ matrix.add_data_sep }}assets" \
