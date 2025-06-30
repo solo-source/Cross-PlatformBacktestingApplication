@@ -71,9 +71,9 @@ jobs:
                        --add-data "templates${{ matrix.add_data_sep }}templates" \
                        --add-data "assets${{ matrix.add_data_sep }}assets" \
                        src/gui/main_window.py
-            cd dist
+            pushd dist
             zip -r "${{ matrix.exe_name }}.zip" "${{ matrix.exe_name }}"
-            cd ..
+            popd
           else
             # Linux or Windows
             pyinstaller --name "${{ matrix.exe_name }}" --onefile $([[ "${{ matrix.os }}" == "windows-latest" ]] && echo "--windowed") \
