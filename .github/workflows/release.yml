@@ -11,27 +11,14 @@ permissions:
   contents: write  # <-- This allows release creation and asset uploads
 
 jobs:
-  linux_release:
-    name: Build & Release (Linux)
+  create_release:
+    name: Create GitHub Release
     runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install PyInstaller
-        run: pip install pyinstaller
-
-      - name: Build Linux Executable
-        run: |
-          pyinstaller --name ModularBacktester --onefile \
-                     --add-data "templates:templates" \
-                     --add-data "assets:assets" \
-                     src/gui/main_window.py
 
       - name: Create GitHub Release
         id: create_release
@@ -44,19 +31,28 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Linux executable
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: dist/ModularBacktester
-          asset_name: ModularBacktester-linux
-          asset_content_type: application/octet-stream
-
-  windows_release:
-    name: Build & Release (Windows)
-    runs-on: windows-latest
+  package:
+    name: Build & Upload Artifacts
+    needs: create_release
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            exe_name: ModularBacktester
+            asset_name: ModularBacktester-linux
+            add_data_sep: :
+          - os: windows-latest
+            exe_name: ModularBacktester.exe
+            asset_name: ModularBacktester-windows.exe
+            add_data_sep: ';'
+          - os: macos-latest
+            exe_name: ModularBacktester.app
+            asset_name: ModularBacktester-macos.zip
+            add_data_sep: :
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Set up Python
@@ -67,71 +63,30 @@ jobs:
       - name: Install PyInstaller
         run: pip install pyinstaller
 
-      - name: Build Windows Executable
+      - name: Build Executable
         run: |
-          pyinstaller --name ModularBacktester.exe --onefile --windowed \
-                     --add-data "templates;templates" \
-                     --add-data "assets;assets" \
-                     src/gui/main_window.py
+          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            # Build .app then zip
+            pyinstaller --name ModularBacktester --onefile --windowed \
+                       --add-data "templates${{ matrix.add_data_sep }}templates" \
+                       --add-data "assets${{ matrix.add_data_sep }}assets" \
+                       src/gui/main_window.py
+            pushd dist
+            zip -r "${{ matrix.exe_name }}.zip" "${{ matrix.exe_name }}"
+            popd
+          else
+            # Linux or Windows
+            pyinstaller --name "${{ matrix.exe_name }}" --onefile $([[ "${{ matrix.os }}" == "windows-latest" ]] && echo "--windowed") \
+                       --add-data "templates${{ matrix.add_data_sep }}templates" \
+                       --add-data "assets${{ matrix.add_data_sep }}assets" \
+                       src/gui/main_window.py
+          fi
 
-      - name: Create or Get GitHub Release
-        id: create_release_win
-        uses: actions/create-release@v1
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Windows executable
+      - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         with:
-          upload_url: ${{ steps.create_release_win.outputs.upload_url }}
-          asset_path: dist/ModularBacktester.exe
-          asset_name: ModularBacktester-windows.exe
-          asset_content_type: application/octet-stream
-
-  macos_release:
-    name: Build & Release (macOS)
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install PyInstaller
-        run: pip install pyinstaller
-
-      - name: Build macOS App Bundle
-        run: |
-          pyinstaller --name ModularBacktester \
-                     --onefile --windowed \
-                     --add-data "templates:templates" \
-                     --add-data "assets:assets" \
-                     --osx-bundle-identifier com.example.modularbacktester \
-                     src/gui/main_window.py
-
-      - name: Create or Get GitHub Release
-        id: create_release_mac
-        uses: actions/create-release@v1
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload macOS executable
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release_mac.outputs.upload_url }}
-          asset_path: dist/ModularBacktester.app
-          asset_name: ModularBacktester-macos.app
+          upload_url: ${{ needs.create_release.outputs.upload_url }}
+          asset_path: |
+            ${{ matrix.os == 'macos-latest' && 'dist/' + matrix.exe_name + '.zip' || 'dist/' + matrix.exe_name }}
+          asset_name: ${{ matrix.asset_name }}
           asset_content_type: application/octet-stream
