@@ -14,79 +14,73 @@ jobs:
   create_release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Create GitHub Release
+      - uses: actions/checkout@v3
+      - name: Create Release
         id: create_release
         uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
 
   package:
     name: Build & Upload Artifacts
     needs: create_release
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
         include:
           - os: ubuntu-latest
             exe_name: ModularBacktester
             asset_name: ModularBacktester-linux
+            build_mode: onefile
             add_data_sep: ':'
-            asset_path: 'dist/ModularBacktester'
+            path: dist/ModularBacktester
           - os: windows-latest
             exe_name: ModularBacktester.exe
             asset_name: ModularBacktester-windows.exe
+            build_mode: onefile
             add_data_sep: ';'
-            asset_path: 'dist/ModularBacktester.exe'
+            path: dist/ModularBacktester.exe
           - os: macos-latest
             exe_name: ModularBacktester.app
             asset_name: ModularBacktester-macos.zip
+            build_mode: onedir
             add_data_sep: ':'
-            asset_path: 'dist/ModularBacktester.app.zip'
-    runs-on: ${{ matrix.os }}
+            path: dist/ModularBacktester-macos.zip
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
+      - uses: actions/checkout@v3
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-
       - name: Install PyInstaller
         run: pip install pyinstaller
 
-      - name: Build on Linux/macOS
-        if: matrix.os != 'windows-latest'
+      - name: Build binary
         run: |
-          pyinstaller --name "${{ matrix.exe_name }}" --onefile --windowed \
-                     --add-data "templates${{ matrix.add_data_sep }}templates" \
-                     --add-data "assets${{ matrix.add_data_sep }}assets" \
-                     src/gui/main_window.py
-          if [ "${{ matrix.os }}" == 'macos-latest' ]; then
+          if [ "${{ matrix.build_mode }}" = "onefile" ]; then
+            pyinstaller --name "${{ matrix.exe_name }}" --onefile --windowed \
+                       --add-data "templates${{ matrix.add_data_sep }}templates" \
+                       --add-data "assets${{ matrix.add_data_sep }}assets" \
+                       src/gui/main_window.py
+          else
+            # onedir mode for macOS .app bundle
+            pyinstaller --name "ModularBacktester" --onedir --windowed \
+                       --add-data "templates${{ matrix.add_data_sep }}templates" \
+                       --add-data "assets${{ matrix.add_data_sep }}assets" \
+                       src/gui/main_window.py
+            # zip the .app directory
             cd dist
-            zip -r "${{ matrix.asset_path }}" "${{ matrix.exe_name }}"
+            zip -r "ModularBacktester-macos.zip" "ModularBacktester.app"
             cd ..
           fi
-
-      - name: Build on Windows
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        run: |
-          pyinstaller --name "${{ matrix.exe_name }}" --onefile --windowed \
-                     --add-data "templates${{ matrix.add_data_sep }}templates" \
-                     --add-data "assets${{ matrix.add_data_sep }}assets" \
-                     src/gui/main_window.py
 
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
@@ -94,6 +88,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: ${{ matrix.asset_path }}
+          asset_path: ${{ matrix.path }}
           asset_name: ${{ matrix.asset_name }}
           asset_content_type: application/octet-stream
