@@ -41,7 +41,7 @@ jobs:
           - os: ubuntu-latest
             exe_name: ModularBacktester
             asset_name: ModularBacktester-linux
-            add_data_sep: :
+            add_data_sep: ':'
           - os: windows-latest
             exe_name: ModularBacktester.exe
             asset_name: ModularBacktester-windows.exe
