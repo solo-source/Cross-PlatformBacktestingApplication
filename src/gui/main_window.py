@@ -21,6 +21,44 @@ from matplotlib.figure import Figure
 import matplotlib.dates as mdates
 import numpy as np
 from PySide6.QtGui import QPixmap
+from src.gui.optimization_dialog import OptimizationDialog
+from src.gui.data_source_widget import DataSourceWidget
+from src.gui.strategy_selector_widget import StrategySelectorWidget
+from src.gui.csv_window import CsvBacktestWindow
+from src.gui.ws_window import WsBacktestWindow
+
+# --- BEGIN MONKEY-PATCH FOR BACKTRADER ---
+# This is a global fix for older backtrader versions where PandasData
+# objects are created without the necessary '_tz' attribute.
+
+# 1. Store the original __init__ method
+_original_pandas_data_init = bt.feeds.PandasData.__init__
+
+
+def _patched_pandas_data_init(self, *args, **kwargs):
+    """A new __init__ that calls the original and then fixes the object."""
+    # 2. Call the original __init__ to let it do its work
+    _original_pandas_data_init(self, *args, **kwargs)
+
+    # 3. After initialization, forcefully ensure '_tz' exists.
+    #    It checks if a 'tz' parameter was passed, otherwise defaults to None.
+    self._tz = getattr(self.p, 'tz', None)
+
+    # Fix _calendar to avoid attribute errors in optimization
+    if not hasattr(self, '_calendar'):
+        self._calendar = None
+    if not hasattr(self, 'fromdate'):
+        self.fromdate = None
+    if not hasattr(self, 'todate'):
+        self.todate = None
+
+    self.sessionstart = getattr(self, 'sessionstart', None)
+    self.sessionend = getattr(self, 'sessionend', None)
+# 4. Replace the original __init__ with our patched version
+bt.feeds.PandasData.__init__ = _patched_pandas_data_init
+
+# --- END MONKEY-PATCH FOR BACKTRADER ---
+
 
 # SQLite database file
 DB_PATH = 'snapshots.db'
@@ -65,10 +103,6 @@ class MainWindow(QMainWindow):
         # Left Tools Panel
         tools_panel = QWidget()
         tools_layout = QVBoxLayout(tools_panel)
-        from src.gui.data_source_widget import DataSourceWidget
-        from src.gui.strategy_selector_widget import StrategySelectorWidget
-        from src.gui.csv_window import CsvBacktestWindow
-        from src.gui.ws_window import WsBacktestWindow
 
         self.data_source_widget = DataSourceWidget()
         tools_layout.addWidget(self.data_source_widget)
@@ -80,6 +114,12 @@ class MainWindow(QMainWindow):
         tools_layout.addWidget(self.run_button)
         tools_layout.addStretch()
         splitter.addWidget(tools_panel)
+
+        #optimize button
+        self.optimize_button = QPushButton("Optimize Strategy")
+        self.optimize_button.clicked.connect(self._open_optimization_dialog)
+        tools_layout.addWidget(self.optimize_button)
+        tools_layout.addStretch()
 
         # Right Tabs
         tabs = QTabWidget()
@@ -205,6 +245,20 @@ class MainWindow(QMainWindow):
     def _on_source_changed(self, source):
         self.csv_widget.setVisible(source == self.data_source_widget.OPTION_CSV)
         self.ws_widget.setVisible(source == self.data_source_widget.OPTION_WS)
+
+    def _open_optimization_dialog(self):
+        # collect the exact same feed used in the normal backtest
+        if self.data_source_widget.current_source == self.data_source_widget.OPTION_CSV:
+            feeds = self.csv_widget.get_datafeed()
+        else:
+            feeds = self.ws_widget.get_datafeed()
+
+        #Instantiate and then pass them along.
+        dlg = OptimizationDialog(self)
+        dlg.set_datafeeds(feeds)
+
+        #show the dialog
+        dlg.exec_()
 
     def _run_backtest(self):
         """
