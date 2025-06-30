@@ -13,7 +13,14 @@ permissions:
 jobs:
   create_release:
     runs-on: ubuntu-latest
+    needs: build_and_test
     steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: ModularBacktester-executable
+          path: dist
+
       - name: Checkout
         uses: actions/checkout@v3
 
@@ -43,5 +50,3 @@ jobs:
           asset_path: dist/ModularBacktester.exe
           asset_name: ModularBacktester-windows.exe
           asset_content_type: application/octet-stream
-
-
