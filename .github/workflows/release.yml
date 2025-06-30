@@ -42,6 +42,17 @@ jobs:
             exe_name: ModularBacktester
             asset_name: ModularBacktester-linux
             add_data_sep: ':'
+            asset_path: 'dist/ModularBacktester'
+          - os: windows-latest
+            exe_name: ModularBacktester.exe
+            asset_name: ModularBacktester-windows.exe
+            add_data_sep: ';'
+            asset_path: 'dist/ModularBacktester.exe'
+          - os: macos-latest
+            exe_name: ModularBacktester.app
+            asset_name: ModularBacktester-macos.zip
+            add_data_sep: ':'
+            asset_path: 'dist/ModularBacktester.app.zip'
           - os: windows-latest
             exe_name: ModularBacktester.exe
             asset_name: ModularBacktester-windows.exe
@@ -71,9 +82,9 @@ jobs:
                        --add-data "templates${{ matrix.add_data_sep }}templates" \
                        --add-data "assets${{ matrix.add_data_sep }}assets" \
                        src/gui/main_window.py
-            pushd dist
+            cd dist
             zip -r "${{ matrix.exe_name }}.zip" "${{ matrix.exe_name }}"
-            popd
+            cd ..
           else
             # Linux or Windows
             pyinstaller --name "${{ matrix.exe_name }}" --onefile $([[ "${{ matrix.os }}" == "windows-latest" ]] && echo "--windowed") \
@@ -86,7 +97,6 @@ jobs:
         uses: actions/upload-release-asset@v1
         with:
           upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: |
-            ${{ matrix.os == 'macos-latest' && 'dist/' + matrix.exe_name + '.zip' || 'dist/' + matrix.exe_name }}
+          asset_path: ${{ matrix.asset_path }}
           asset_name: ${{ matrix.asset_name }}
           asset_content_type: application/octet-stream
